@@ -11,7 +11,7 @@ namespace ShiroFlake
 		#region Member
 
 		// DateTime do not provide UTC epoch, only provide UTC time zone
-		private const long UTC_OFFSET = 62135596800000;
+		//private const long UTC_OFFSET = 62135596800000;
 		//private const long UTC_OFFSET_TICKS = 621355968000000000;
 		private readonly uint _Mask = 0;
 		private readonly byte _MaxBit = 63;
@@ -62,7 +62,7 @@ namespace ShiroFlake
 					throw new ArgumentException($"The configuration is invalid, it use { usedBit } bit but ShiroFlake only accept { this._MaxBit }.");
 				}
 
-				if (config.CustomOffset > (DateTime.UtcNow.Ticks / 10_000) - UTC_OFFSET)
+				if (config.CustomOffset > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 				{
 					throw new ArgumentOutOfRangeException("Offset time is bigger than current UTC epoch.");
 				}
@@ -74,7 +74,7 @@ namespace ShiroFlake
 				throw new ArgumentOutOfRangeException($"The machine id is out of range. Acceptable range is 0 to { (1 << config.MachineBit) - 1 }");
 			}
 
-			this._Config.CustomOffset += UTC_OFFSET;
+			//this._Config.CustomOffset += UTC_OFFSET;
 			this._Config.TimeStampBit = (byte)(this._MaxBit - this._Config.TimeStampBit);
 			this._Config.MachineBit = (byte)(this._Config.TimeStampBit - this._Config.MachineBit);
 
@@ -102,7 +102,7 @@ namespace ShiroFlake
 		/// </returns>
 		internal long GetMiliseconds()
 		{
-			return (DateTime.UtcNow.Ticks / 10_000) - this._Config.CustomOffset;
+			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - this._Config.CustomOffset;
 		}
 
 		#endregion Internal Method
@@ -230,6 +230,5 @@ namespace ShiroFlake
 		}
 
 		#endregion Public Method
-
 	}
 }
