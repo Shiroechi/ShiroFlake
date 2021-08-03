@@ -10,9 +10,6 @@ namespace ShiroFlake
 	{
 		#region Member
 
-		// DateTime do not provide UTC epoch, only provide UTC time zone
-		//private const long UTC_OFFSET = 62135596800000;
-		//private const long UTC_OFFSET_TICKS = 621355968000000000;
 		private readonly uint _Mask = 0;
 		private readonly byte _MaxBit = 63;
 		private readonly bool _Waiting = false;
@@ -35,7 +32,7 @@ namespace ShiroFlake
 		///		Custom configuration to use generate the <see cref="ShiroFlake"/> number.
 		/// </param>
 		/// <param name="waiting">
-		///		If set <see langword="true"/> the gerator will waiting 
+		///		If set <see langword="true"/> the generator will waiting 
 		///		the next timestamp when the sequence number reach the maximum.
 		/// </param>
 		/// <param name="unsigned">
@@ -45,7 +42,7 @@ namespace ShiroFlake
 		{
 			this._Waiting = waiting;
 
-			if (unsigned == true)
+			if (unsigned)
 			{
 				this._MaxBit = 64;
 			}
@@ -71,10 +68,9 @@ namespace ShiroFlake
 
 			if (machineId < 0 || machineId > (1 << this._Config.MachineBit) - 1)
 			{
-				throw new ArgumentOutOfRangeException($"The machine id is out of range. Acceptable range is 0 to { (1 << config.MachineBit) - 1 }");
+				throw new ArgumentOutOfRangeException($"The machine id is out of range. Acceptable range is 0 to { (1 << config.MachineBit) - 1 }.");
 			}
 
-			//this._Config.CustomOffset += UTC_OFFSET;
 			this._Config.TimeStampBit = (byte)(this._MaxBit - this._Config.TimeStampBit);
 			this._Config.MachineBit = (byte)(this._Config.TimeStampBit - this._Config.MachineBit);
 
@@ -119,12 +115,17 @@ namespace ShiroFlake
 		{
 			if (this._MaxBit != 63)
 			{
-				throw new Exception("The generator was initialized for usigned id, Use NextUnsignedId method.");
+				throw new Exception("The generator was initialized for unsigned id, Use NextUnsignedId method.");
 			}
 
 			this._Mutex.WaitOne();
 
 			var currentTimeStamp = this.GetMiliseconds();
+
+			if (currentTimeStamp >= ((long)1 << (this._MaxBit - this._Config.TimeStampBit)))
+			{
+				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
+			}
 
 			if (this._State._CurrentTime < currentTimeStamp)
 			{
@@ -154,11 +155,6 @@ namespace ShiroFlake
 				this._State._Sequence = (this._State._Sequence + 1) & this._Mask;
 			}
 
-			if (this._State._CurrentTime >= ((long)1 << (this._MaxBit - this._Config.TimeStampBit)))
-			{
-				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
-			}
-
 			var id = this._State._CurrentTime << this._Config.TimeStampBit
 				| (long)(this._State._MachineId << this._Config.MachineBit)
 				| (long)this._State._Sequence;
@@ -178,12 +174,17 @@ namespace ShiroFlake
 		{
 			if (this._MaxBit != 64)
 			{
-				throw new Exception("Usigned is not true when initialized the generator, use NextId method.");
+				throw new Exception("Unsigned is not true when initialized the generator, use NextId method.");
 			}
 
 			this._Mutex.WaitOne();
 
 			var currentTimeStamp = this.GetMiliseconds();
+
+			if (currentTimeStamp >= ((long)1 << (this._MaxBit - this._Config.TimeStampBit)))
+			{
+				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
+			}
 
 			if (this._State._CurrentTime < currentTimeStamp)
 			{
@@ -215,14 +216,9 @@ namespace ShiroFlake
 				this._State._Sequence = (this._State._Sequence + 1) & this._Mask;
 			}
 
-			if (this._State._CurrentTime >= ((long)1 << (this._MaxBit - this._Config.TimeStampBit)))
-			{
-				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
-			}
-
 			var id = ((ulong)this._State._CurrentTime << this._Config.TimeStampBit)
-				| (uint)(this._State._MachineId << this._Config.MachineBit)
-				| (uint)this._State._Sequence;
+				| (ulong)(this._State._MachineId << this._Config.MachineBit)
+				| (ulong)this._State._Sequence;
 
 			this._Mutex.ReleaseMutex();
 
