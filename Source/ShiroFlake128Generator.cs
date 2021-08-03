@@ -142,13 +142,16 @@ namespace ShiroFlake
 						{
 							this._State._CurrentTime = this.GetMilliseconds();
 						}
+
+						var randomNumberBytes = new byte[8];
+						this._RNG.GetNonZeroBytes(randomNumberBytes);
+						this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
 					}
 					else
 					{
 						return null;
 					}
 				}
-				this._State._RandomNumbers++;
 			}
 
 			var id = new List<byte>();
@@ -225,13 +228,16 @@ namespace ShiroFlake
 						{
 							this._State._CurrentTime = this.GetMilliseconds();
 						}
+
+						var randomNumberBytes = new byte[8];
+						this._RNG.GetNonZeroBytes(randomNumberBytes);
+						this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
 					}
 					else
 					{
 						return null;
 					}
 				}
-				this._State._RandomNumbers++;
 			}
 
 #if NET5_0_OR_GREATER
