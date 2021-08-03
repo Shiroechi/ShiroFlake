@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Security;
 using System.Security.Cryptography;
 using System.Threading;
 
@@ -115,7 +116,7 @@ namespace ShiroFlake
 
 			var currentTimeStamp = this.GetMilliseconds();
 
-			if (currentTimeStamp >= (1 << TimeStampBit) - 1)
+			if (currentTimeStamp >= ((long)1 << TimeStampBit) - 1)
 			{
 				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
 			}
@@ -152,30 +153,120 @@ namespace ShiroFlake
 
 			var id = new List<byte>();
 
+#if NET5_0_OR_GREATER
+			var temp = new Span<byte>();
+			var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(temp, timestampWithMachineId);
+
+			temp.Slice(8);
+
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(temp, this._State._RandomNumbers);
+			id.AddRange(temp.ToArray());
+#else
 			if (BitConverter.IsLittleEndian)
 			{
-				var reverseTimestamp = BitConverter.GetBytes(this._State._CurrentTime);
-				Array.Reverse(reverseTimestamp);
-				id.AddRange(reverseTimestamp);
+				var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
+				var reversetimestampWithMachineId = BitConverter.GetBytes(timestampWithMachineId);
+				Array.Reverse(reversetimestampWithMachineId);
+				id.AddRange(reversetimestampWithMachineId);
 
-				var reverseMachineId = BitConverter.GetBytes(this._State._MachineId);
-				Array.Reverse(reverseMachineId);
-				id.AddRange(reverseMachineId);
-
-				var reverseSequence = BitConverter.GetBytes(this._State._RandomNumbers);
-				Array.Reverse(reverseSequence);
-				id.AddRange(reverseSequence);
+				var reverseRandomNumbers = BitConverter.GetBytes(this._State._RandomNumbers);
+				Array.Reverse(reverseRandomNumbers);
+				id.AddRange(reverseRandomNumbers);
 			}
 			else
 			{
-				id.AddRange(BitConverter.GetBytes(this._State._CurrentTime));
-				id.AddRange(BitConverter.GetBytes(this._State._MachineId));
+				var timestampWithMachineId = this._State._CurrentTime << MachineBit | this._State._MachineId;
+				id.AddRange(BitConverter.GetBytes(timestampWithMachineId));
 				id.AddRange(BitConverter.GetBytes(this._State._RandomNumbers));
 			}
-
+#endif
 			this._Mutex.ReleaseMutex();
 
 			return id.ToArray();
+		}
+
+		/// <summary>
+		///		Generate the unique id from this machine.
+		/// </summary>
+		/// <remarks>
+		///		Remove unnecessary check and locks.
+		/// </remarks>
+		/// <returns>
+		///		A 128-bit integer unique number in array og bytes.
+		/// </returns>
+		public byte[] FastNextId()
+		{
+			var currentTimeStamp = this.GetMilliseconds();
+
+			if (currentTimeStamp >= ((long)1 << TimeStampBit) - 1)
+			{
+				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
+			}
+
+			if (this._State._CurrentTime < currentTimeStamp)
+			{
+				this._State._CurrentTime = currentTimeStamp;
+				var randomNumberBytes = new byte[8];
+				this._RNG.GetNonZeroBytes(randomNumberBytes);
+				this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
+			}
+			else // this._State._CurrentTime >= currentTimeStamp
+			{
+				if ((this._State._RandomNumbers + 1) == ulong.MaxValue)
+				{
+					// C# can't make a thread to sleep in ticks
+					// the solution is to loop until the time is changed
+					// or return 0 value.
+
+					if (this._Waiting)
+					{
+						while (this._State._CurrentTime <= currentTimeStamp)
+						{
+							this._State._CurrentTime = this.GetMilliseconds();
+						}
+					}
+					else
+					{
+						return null;
+					}
+				}
+				this._State._RandomNumbers++;
+			}
+
+#if NET5_0_OR_GREATER
+			var id = new Span<byte>();
+
+			var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(id, timestampWithMachineId);
+
+			id.Slice(8);
+
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(id, this._State._RandomNumbers);
+
+			return id.ToArray();
+#else
+			var id = new List<byte>();
+
+			if (BitConverter.IsLittleEndian)
+			{
+				var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
+				var reversetimestampWithMachineId = BitConverter.GetBytes(timestampWithMachineId);
+				Array.Reverse(reversetimestampWithMachineId);
+				id.AddRange(reversetimestampWithMachineId);
+
+				var reverseRandomNumbers = BitConverter.GetBytes(this._State._RandomNumbers);
+				Array.Reverse(reverseRandomNumbers);
+				id.AddRange(reverseRandomNumbers);
+			}
+			else
+			{
+				var timestampWithMachineId = this._State._CurrentTime << MachineBit | this._State._MachineId;
+				id.AddRange(BitConverter.GetBytes(timestampWithMachineId));
+				id.AddRange(BitConverter.GetBytes(this._State._RandomNumbers));
+			}
+			return id.ToArray();
+#endif
 		}
 
 		#endregion Public Method
