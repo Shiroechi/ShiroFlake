@@ -16,6 +16,7 @@ namespace ShiroFlake
 		private readonly ShiroFlakeConfig _Config;
 		private Flake _State;
 		private readonly Mutex _Mutex;
+		private readonly bool _WithOffset = true;
 
 		#endregion Member
 
@@ -64,6 +65,11 @@ namespace ShiroFlake
 					throw new ArgumentOutOfRangeException("Offset time is bigger than current UTC epoch.");
 				}
 				this._Config = config;
+
+				if (this._Config.CustomOffset == 0)
+				{
+					this._WithOffset = false;
+				}
 			}
 
 			if (machineId < 0 || machineId > (1 << this._Config.MachineBit) - 1)
@@ -86,6 +92,11 @@ namespace ShiroFlake
 			};
 		}
 
+		~ShiroFlakeGenerator()
+		{
+			this._Mutex.Dispose();
+		}
+
 		#endregion Constructor & Destructor
 
 		#region Internal Method
@@ -98,6 +109,11 @@ namespace ShiroFlake
 		/// </returns>
 		internal long GetMiliseconds()
 		{
+			if (this._WithOffset == false)
+			{
+				return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+
 			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - this._Config.CustomOffset;
 		}
 
@@ -113,19 +129,9 @@ namespace ShiroFlake
 		/// </returns>
 		public long NextId()
 		{
-			if (this._MaxBit != 63)
-			{
-				throw new Exception("The generator was initialized for unsigned id, Use NextUnsignedId method.");
-			}
-
 			this._Mutex.WaitOne();
 
 			var currentTimeStamp = this.GetMiliseconds();
-
-			if (currentTimeStamp >= ((long)1 << (this._MaxBit - this._Config.TimeStampBit)))
-			{
-				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
-			}
 
 			if (this._State._CurrentTime < currentTimeStamp)
 			{
@@ -136,11 +142,12 @@ namespace ShiroFlake
 			{
 				if (((this._State._Sequence + 1) & this._Mask) == 0)
 				{
-					// C# can't make a thread to sleep in ticks
-					// the solution is to loop until the time is changed
-					// or return 0 value.
+                    // C# can't make a thread to sleep in ticks
+                    // the solution is to loop until the time is changed
+                    // or return 0 value.
 
-					if (this._Waiting)
+                    Console.WriteLine("masking sequence");
+                    if (this._Waiting)
 					{
 						while (this._State._CurrentTime <= currentTimeStamp)
 						{
@@ -172,19 +179,9 @@ namespace ShiroFlake
 		/// </returns>
 		public ulong NextUnsignedId()
 		{
-			if (this._MaxBit != 64)
-			{
-				throw new Exception("Unsigned is not true when initialized the generator, use NextId method.");
-			}
-
 			this._Mutex.WaitOne();
 
 			var currentTimeStamp = this.GetMiliseconds();
-
-			if (currentTimeStamp >= ((long)1 << (this._MaxBit - this._Config.TimeStampBit)))
-			{
-				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
-			}
 
 			if (this._State._CurrentTime < currentTimeStamp)
 			{
@@ -215,7 +212,6 @@ namespace ShiroFlake
 				}
 				this._State._Sequence = (this._State._Sequence + 1) & this._Mask;
 			}
-
 			var id = ((ulong)this._State._CurrentTime << this._Config.TimeStampBit)
 				| (ulong)(this._State._MachineId << this._Config.MachineBit)
 				| (ulong)this._State._Sequence;

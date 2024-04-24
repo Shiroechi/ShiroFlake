@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Security;
 using System.Security.Cryptography;
@@ -21,7 +22,8 @@ namespace ShiroFlake
 		private readonly bool _RngSupplied = false;
 		private Flake128 _State;
 		private readonly Mutex _Mutex;
-		private readonly RNGCryptoServiceProvider _RNG;
+		private readonly RandomNumberGenerator _Random;
+		private readonly bool _WithOffset;
 
 		#endregion Member
 
@@ -41,15 +43,15 @@ namespace ShiroFlake
 		///		If set <see langword="true"/> the gerator will waiting 
 		///		the next timestamp when the sequence number reach the maximum.
 		/// </param>
-		public ShiroFlake128Generator(uint machineId, RNGCryptoServiceProvider rng = null, long offset = 1577836800000, bool waiting = false)
+		public ShiroFlake128Generator(uint machineId, RandomNumberGenerator rng = null, long offset = 1577836800000, bool waiting = false)
 		{
 			if (rng == null)
 			{
-				this._RNG = new RNGCryptoServiceProvider();
+				this._Random = RandomNumberGenerator.Create();
 			}
 			else
 			{
-				this._RNG = rng;
+				this._Random = rng;
 				this._RngSupplied = true;
 			}
 
@@ -58,6 +60,11 @@ namespace ShiroFlake
 			if (offset > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 			{
 				throw new ArgumentOutOfRangeException("Offset time is bigger than current UTC epoch.");
+			}
+
+			if (offset == 0)
+			{
+				this._WithOffset = false;
 			}
 
 			this._CustomOffset = offset;
@@ -81,8 +88,10 @@ namespace ShiroFlake
 		{
 			if (this._RngSupplied == false)
 			{
-				this._RNG.Dispose();
+				this._Random.Dispose();
 			}
+
+			this._Mutex.Dispose();
 		}
 
 		#endregion Constructor & Destructor
@@ -97,6 +106,10 @@ namespace ShiroFlake
 		/// </returns>
 		internal long GetMilliseconds()
 		{
+			if (this._WithOffset == false)
+			{
+				return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			}
 			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - this._CustomOffset;
 		}
 
@@ -116,17 +129,12 @@ namespace ShiroFlake
 
 			var currentTimeStamp = this.GetMilliseconds();
 
-			if (currentTimeStamp >= ((long)1 << TimeStampBit) - 1)
-			{
-				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
-			}
-
 			if (this._State._CurrentTime < currentTimeStamp)
 			{
 				this._State._CurrentTime = currentTimeStamp;
 				var randomNumberBytes = new byte[8];
-				this._RNG.GetNonZeroBytes(randomNumberBytes);
-				this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
+				this._Random.GetNonZeroBytes(randomNumberBytes);
+				this._State._RandomNumbers = BinaryPrimitives.ReadUInt64LittleEndian(randomNumberBytes);
 			}
 			else // this._State._CurrentTime >= currentTimeStamp
 			{
@@ -144,7 +152,7 @@ namespace ShiroFlake
 						}
 
 						var randomNumberBytes = new byte[8];
-						this._RNG.GetNonZeroBytes(randomNumberBytes);
+						this._Random.GetNonZeroBytes(randomNumberBytes);
 						this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
 					}
 					else
@@ -159,11 +167,11 @@ namespace ShiroFlake
 #if NET5_0_OR_GREATER
 			var temp = new Span<byte>();
 			var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
-			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(temp, timestampWithMachineId);
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(temp, timestampWithMachineId);
 
 			temp.Slice(8);
 
-			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(temp, this._State._RandomNumbers);
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(temp, this._State._RandomNumbers);
 			id.AddRange(temp.ToArray());
 #else
 			if (BitConverter.IsLittleEndian)
@@ -189,91 +197,91 @@ namespace ShiroFlake
 			return id.ToArray();
 		}
 
-		/// <summary>
-		///		Generate the unique id from this machine.
-		/// </summary>
-		/// <remarks>
-		///		Remove unnecessary check and locks.
-		/// </remarks>
-		/// <returns>
-		///		A 128-bit integer unique number in array og bytes.
-		/// </returns>
-		public byte[] FastNextId()
-		{
-			var currentTimeStamp = this.GetMilliseconds();
+//		/// <summary>
+//		///		Generate the unique id from this machine.
+//		/// </summary>
+//		/// <remarks>
+//		///		Remove unnecessary check and locks.
+//		/// </remarks>
+//		/// <returns>
+//		///		A 128-bit integer unique number in array og bytes.
+//		/// </returns>
+//		public byte[] FastNextId()
+//		{
+//			var currentTimeStamp = this.GetMilliseconds();
 
-			if (currentTimeStamp >= ((long)1 << TimeStampBit) - 1)
-			{
-				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
-			}
+//			if (currentTimeStamp >= ((long)1 << TimeStampBit) - 1)
+//			{
+//				throw new Exception("Timestamp was over the limit and can not generate new timestamp.");
+//			}
 
-			if (this._State._CurrentTime < currentTimeStamp)
-			{
-				this._State._CurrentTime = currentTimeStamp;
-				var randomNumberBytes = new byte[8];
-				this._RNG.GetNonZeroBytes(randomNumberBytes);
-				this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
-			}
-			else // this._State._CurrentTime >= currentTimeStamp
-			{
-				if ((this._State._RandomNumbers + 1) == ulong.MaxValue)
-				{
-					// C# can't make a thread to sleep in ticks
-					// the solution is to loop until the time is changed
-					// or return 0 value.
+//			if (this._State._CurrentTime < currentTimeStamp)
+//			{
+//				this._State._CurrentTime = currentTimeStamp;
+//				var randomNumberBytes = new byte[8];
+//				this._Random.GetNonZeroBytes(randomNumberBytes);
+//				this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
+//			}
+//			else // this._State._CurrentTime >= currentTimeStamp
+//			{
+//				if ((this._State._RandomNumbers + 1) == ulong.MaxValue)
+//				{
+//					// C# can't make a thread to sleep in ticks
+//					// the solution is to loop until the time is changed
+//					// or return 0 value.
 
-					if (this._Waiting)
-					{
-						while (this._State._CurrentTime <= currentTimeStamp)
-						{
-							this._State._CurrentTime = this.GetMilliseconds();
-						}
+//					if (this._Waiting)
+//					{
+//						while (this._State._CurrentTime <= currentTimeStamp)
+//						{
+//							this._State._CurrentTime = this.GetMilliseconds();
+//						}
 
-						var randomNumberBytes = new byte[8];
-						this._RNG.GetNonZeroBytes(randomNumberBytes);
-						this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
-					}
-					else
-					{
-						return null;
-					}
-				}
-			}
+//						var randomNumberBytes = new byte[8];
+//						this._Random.GetNonZeroBytes(randomNumberBytes);
+//						this._State._RandomNumbers = BitConverter.ToUInt64(randomNumberBytes, 0);
+//					}
+//					else
+//					{
+//						return null;
+//					}
+//				}
+//			}
 
-#if NET5_0_OR_GREATER
-			var id = new Span<byte>();
+//#if NET5_0_OR_GREATER
+//			var id = new Span<byte>();
 
-			var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
-			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(id, timestampWithMachineId);
+//			var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
+//			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(id, timestampWithMachineId);
 
-			id.Slice(8);
+//			id.Slice(8);
 
-			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(id, this._State._RandomNumbers);
+//			System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(id, this._State._RandomNumbers);
 
-			return id.ToArray();
-#else
-			var id = new List<byte>();
+//			return id.ToArray();
+//#else
+//			var id = new List<byte>();
 
-			if (BitConverter.IsLittleEndian)
-			{
-				var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
-				var reversetimestampWithMachineId = BitConverter.GetBytes(timestampWithMachineId);
-				Array.Reverse(reversetimestampWithMachineId);
-				id.AddRange(reversetimestampWithMachineId);
+//			if (BitConverter.IsLittleEndian)
+//			{
+//				var timestampWithMachineId = (ulong)this._State._CurrentTime << MachineBit | this._State._MachineId;
+//				var reversetimestampWithMachineId = BitConverter.GetBytes(timestampWithMachineId);
+//				Array.Reverse(reversetimestampWithMachineId);
+//				id.AddRange(reversetimestampWithMachineId);
 
-				var reverseRandomNumbers = BitConverter.GetBytes(this._State._RandomNumbers);
-				Array.Reverse(reverseRandomNumbers);
-				id.AddRange(reverseRandomNumbers);
-			}
-			else
-			{
-				var timestampWithMachineId = this._State._CurrentTime << MachineBit | this._State._MachineId;
-				id.AddRange(BitConverter.GetBytes(timestampWithMachineId));
-				id.AddRange(BitConverter.GetBytes(this._State._RandomNumbers));
-			}
-			return id.ToArray();
-#endif
-		}
+//				var reverseRandomNumbers = BitConverter.GetBytes(this._State._RandomNumbers);
+//				Array.Reverse(reverseRandomNumbers);
+//				id.AddRange(reverseRandomNumbers);
+//			}
+//			else
+//			{
+//				var timestampWithMachineId = this._State._CurrentTime << MachineBit | this._State._MachineId;
+//				id.AddRange(BitConverter.GetBytes(timestampWithMachineId));
+//				id.AddRange(BitConverter.GetBytes(this._State._RandomNumbers));
+//			}
+//			return id.ToArray();
+//#endif
+//		}
 
 		#endregion Public Method
 	}
